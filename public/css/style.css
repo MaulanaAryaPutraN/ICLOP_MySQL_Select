@@ -1,0 +1,157 @@
+*, html {
+    margin:0;
+    padding:0;  
+}
+
+.custom-button-sign-in {
+    width: 100px;
+    height: 35px;
+    border-radius: 20px;
+    background-color: #FEFEFE;
+    color: #000;
+    border: none;
+    margin-right: 10px;
+}
+
+.custom-button-sign-in:hover {
+    background-color: #FEFEFE;
+    /* Mengubah warna latar belakang saat hover */
+    color: #0079FF;
+}
+
+.custom-button-sign-in {
+
+    border-radius: 20px;
+    border: none;
+}
+.custom-button-sign-up {
+    width: 100px;
+    height: 35px;
+    border-radius: 20px;
+    background-color: #0079FF;
+    color: #fff;
+    border: none;
+}
+
+body {
+    background-color: #fff;
+    font-family: 'Poppins', sans-serif;
+
+}
+
+.nav-link:focus,
+.nav-link:hover {
+    border-bottom: 2px solid #0079FF;
+    margin-right: 10px;
+}
+
+.navbar.navbar-expand-lg {
+    margin-left: 20px;
+    /* Memberikan margin bawah sebesar 20px pada navbar */
+    margin-right: 20px;
+}
+
+.btn.btn-outline-secondary {
+    width: 100px;
+    height: 35px;
+    border-radius: 20px;
+    background-color: #0079FF;
+    color: #fff;
+    border: none;
+}
+
+.welcome-to-iclop {
+    font-size: 22px;
+    color: #34364A;
+}
+
+.where-education {
+    font-size: 45px;
+    font-weight: bold;
+    color: #34364A;
+}
+
+.subtext {
+    font-size: 20;
+    color: #34364A;
+}
+
+.education {
+    color: #0079FF;
+}
+
+.divider {
+    margin-top: 20px;
+    width: 100%;
+    height: 2px;
+    background-color: #EAEAEA;
+}
+
+.sign-in-modal {
+    color: #0D0C22;
+    font-family: Poppins;
+    font-size: 36px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: normal;
+    letter-spacing: 0.9px;
+}
+
+.welcome-modal {
+    color: #96979D;
+    font-family: Poppins;
+    font-size: 20px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: normal;
+    letter-spacing: 0.5px;
+}
+
+.form-modal{
+    margin-top: 50px;
+    width: auto;
+    height: 48px;
+    flex-shrink: 0;
+}
+
+.forgot-password-modal{
+    text-align: right;
+    margin-top: 30px;
+    color: #1A79E3;
+    font-family: Poppins;
+    font-size: 15px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: normal;
+    letter-spacing: 0.375px;
+}
+
+.button-sign-in-modal{
+    width: auto;
+    height: 45px;
+    border-radius: 7px;
+    background: #1A79E3;
+}
+
+.custom-button-sign-in-modal{
+    margin-top: 40px;
+    width: 375px;
+    height: 35px;
+    border-radius: 7px;
+    background-color: #0079FF;
+    color: #fff;
+    border: none;
+}
+
+.dont-have-account-modal{
+    text-align: center;
+    margin-top: 12px;
+    color: #999AA4;
+    font-family: Poppins;
+    font-size: 15px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: normal;
+    letter-spacing: 0.375px;
+}
+

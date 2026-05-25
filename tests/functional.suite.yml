@@ -1,0 +1,16 @@
+#
+# Suite for functional tests
+# Emulate web requests and make application process them
+# Include one of framework modules (Symfony, Yii2, Laravel, Phalcon5) to use it
+# Remove this suite if you don't use frameworks
+
+actor: FunctionalTester
+modules:
+    enabled:
+        # - Db:
+        #     dsn: 'mysql:host=localhost;dbname=iclop_v2_testing'
+        #     user: 'root'
+        #     password: ''
+        #     cleanup: true
+        #     populate: true
+step_decorators: ~

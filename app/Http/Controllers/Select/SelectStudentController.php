@@ -99,6 +99,42 @@ class SelectStudentController extends Controller
             $lastStatus = $lastSubmission->status;
         }
 
+        // ---------------------------------------------------------------
+        // FITUR HINT — hanya berlaku untuk soal tugas.
+        // Hint dianggap "dipakai" jika ada baris submission bertanda
+        // khusus '[HINT_PENALTY]' pada soal ini (lihat showHint()).
+        // Baris penalti tersebut sengaja TIDAK dihitung sebagai attempt
+        // asli, sehingga dipisahkan lewat filter query != '[HINT_PENALTY]'.
+        // ---------------------------------------------------------------
+        $attemptsReal  = 0;
+        $hintUsed      = false;
+        $showHintOffer = false;
+
+        if ($currentPhase === 'tugas') {
+            $attemptsReal = DB::table('select_student_submissions')
+                ->join('select_queries', 'select_queries.id', '=', 'select_student_submissions.query_id')
+                ->where('select_student_submissions.user_id', $userId)
+                ->where('select_student_submissions.topic_detail_id', $start)
+                ->where('select_student_submissions.submission_type', 'tugas')
+                ->where('select_student_submissions.answer_number', $page)
+                ->where('select_student_submissions.enroll_id', $enrollId)
+                ->where('select_queries.query', '!=', '[HINT_PENALTY]')
+                ->count();
+
+            $hintUsed = DB::table('select_student_submissions')
+                ->join('select_queries', 'select_queries.id', '=', 'select_student_submissions.query_id')
+                ->where('select_student_submissions.user_id', $userId)
+                ->where('select_student_submissions.topic_detail_id', $start)
+                ->where('select_student_submissions.submission_type', 'tugas')
+                ->where('select_student_submissions.answer_number', $page)
+                ->where('select_student_submissions.enroll_id', $enrollId)
+                ->where('select_queries.query', '[HINT_PENALTY]')
+                ->exists();
+
+            // Tawarkan hint kalau: sudah gagal > 2 kali, belum benar, dan belum pernah pakai hint
+            $showHintOffer = $attemptsReal > 2 && $lastStatus !== 'true' && !$hintUsed;
+        }
+
         // Hitung total soal per phase
         $totalPercobaan = $detail->total_percobaan;
         $totalTugas     = $detail->total_tugas;
@@ -161,9 +197,22 @@ class SelectStudentController extends Controller
             'isSequential'    => $isSequential,
             'isReset'         => $isReset,
             'queryResultHtml' => $queryResultHtml,
+            'attemptsReal'    => $attemptsReal,
+            'hintUsed'        => $hintUsed,
+            'showHintOffer'   => $showHintOffer,
         ];
 
         if ($request->ajax()) {
+            // Khusus untuk update modul/PDF saja saat pindah subtopik
+            if ($request->get('modul_only')) {
+                return response()->json([
+                    'pdf_reader' => $pdf_reader,
+                    'html_start' => $pdf_reader
+                        ? asset('select/modul/' . $html_start)
+                        : $html_start,
+                    'modul_url'  => $pdf_reader ? asset('select/modul/' . $html_start) : null,
+                ]);
+            }
             return view('select.student._answer_section', $viewData);
         }
 
@@ -176,19 +225,15 @@ class SelectStudentController extends Controller
     // ------------------------------------------------------------------
     private function getCurrentPhaseAndPage(SelectTopicDetails $detail, int $enrollId, int $userId, Request $request): array
     {
-        // Kalau ada request eksplisit dari pagination
         if ($request->has('phase') && $request->has('page')) {
             return [$request->get('phase'), (int) $request->get('page')];
         }
 
         $totalPercobaan = $detail->total_percobaan;
         $totalTugas     = $detail->total_tugas;
-
-        // Cek apakah percobaan sudah selesai semua
         $percobaanDone = $this->isPhaseComplete($userId, $detail->id, 'percobaan', $totalPercobaan, $enrollId);
 
         if (!$percobaanDone) {
-            // Cari soal percobaan yang belum benar
             for ($i = 1; $i <= $totalPercobaan; $i++) {
                 $done = DB::table('select_student_submissions')
                     ->where('user_id', $userId)->where('topic_detail_id', $detail->id)
@@ -199,7 +244,6 @@ class SelectStudentController extends Controller
             return ['percobaan', 1];
         }
 
-        // Percobaan selesai → lanjut tugas
         for ($i = 1; $i <= $totalTugas; $i++) {
             $done = DB::table('select_student_submissions')
                 ->where('user_id', $userId)->where('topic_detail_id', $detail->id)
@@ -250,32 +294,26 @@ class SelectStudentController extends Controller
 
         $dbName = "db_kuliah";
 
-        // Simpan query
         $queryId = DB::table('select_queries')->insertGetId([
             'query'      => $userInput,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
-        // Ambil kunci jawaban untuk soal ini
         $expected = SelectExpectedQuery::where('topic_detail_id', $topicDetailId)
             ->where('type', $submissionType)
             ->where('answer_number', $answerNumber)
             ->first();
+        $startTime = microtime(true);
+        [$status, $feedback] = $this->validateWithMyTap(
+            $userInput,
+            $dbName,
+            $expected?->expected_query ?? null
+        );
+        $endTime = microtime(true);
+        $executionTimeSecond = round($endTime - $startTime, 2);
 
-        // Validasi + pencocokan: semuanya didelegasikan ke myTAP
-        $isSelect = (bool) preg_match('/^\s*select\s+/i', $userInput);
-        if ($isSelect) {
-            // Kirim query mahasiswa + kunci jawaban ke prosedur myTAP.
-            // myTAP yang mengerjakan: validasi sintaks lalu cocokkan hasil.
-            [$status, $feedback] = $this->validateWithMyTap(
-                $userInput,
-                $dbName,
-                $expected?->expected_query ?? null
-            );
-        } else {
-            [$status, $feedback] = $this->validateDmlQuery($userInput, $topicDetailId, $submissionType, $answerNumber);
-        }
+        Log::info("myTAP execution time: {$executionTimeSecond} seconds with query: {$userInput}");
 
         $feedbackId = DB::table('select_feedbacks')->insertGetId([
             'query_id'         => $queryId,
@@ -338,10 +376,6 @@ class SelectStudentController extends Controller
                 \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
             ]);
 
-            $pdo->exec('UPDATE tap.counters SET test_num = 0 WHERE id = 1');
-
-            // Kirim dua parameter: query mahasiswa + kunci jawaban (nullable).
-            // myTAP akan melakukan validasi sintaks SEKALIGUS pencocokan hasil.
             $stmt = $pdo->prepare('CALL test_select_query(?, ?)');
             $stmt->execute([$userInput, $expectedQuery]);
             $row       = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -364,41 +398,6 @@ class SelectStudentController extends Controller
         }
     }
 
-    // ------------------------------------------------------------------
-    // Validasi DML
-    // ------------------------------------------------------------------
-    private function validateDmlQuery(string $userInput, int $topicDetailId, string $type, int $answerNumber): array
-    {
-        $expected = SelectExpectedQuery::where('topic_detail_id', $topicDetailId)
-            ->where('type', $type)->where('answer_number', $answerNumber)->first();
-
-        if (!$expected) return ['false', 'No expected answer found.'];
-
-        try {
-            DB::connection('mysql_testing')->beginTransaction();
-            DB::connection('mysql_testing')->statement($userInput);
-            $studentResult = DB::connection('mysql_testing')->select("SELECT * FROM {$expected->expected_table}");
-            DB::connection('mysql_testing')->rollBack();
-
-            DB::connection('mysql_testing')->beginTransaction();
-            DB::connection('mysql_testing')->statement($expected->expected_query);
-            $expectedResult = DB::connection('mysql_testing')->select("SELECT * FROM {$expected->expected_table}");
-            DB::connection('mysql_testing')->rollBack();
-
-            $normalize = fn($r) => array_map(fn($row) => (array) $row, $r);
-
-            if ($normalize($studentResult) == $normalize($expectedResult)) {
-                return ['true', 'Congratulations! Your query is correct.'];
-            }
-            return ['false', 'Your query does not match the expected result.'];
-        } catch (\Exception $e) {
-            try {
-                DB::connection('mysql_testing')->rollBack();
-            } catch (\Exception $ex) {
-            }
-            return ['false', $e->getMessage()];
-        }
-    }
 
     // ------------------------------------------------------------------
     // Setup koneksi ke db_kuliah (sudah dibuat dosen)
@@ -432,10 +431,6 @@ class SelectStudentController extends Controller
         return max(0, 100 - ($wrongBefore * 10));
     }
 
-    // ------------------------------------------------------------------
-    // Skor subtopik = rata-rata skor semua soal tugas dalam subtopik.
-    // Soal yang belum dijawab benar dihitung skor 0.
-    // ------------------------------------------------------------------
     public static function getSubtopicScore(int $userId, int $topicDetailId, int $enrollId): float
     {
         $detail = SelectTopicDetails::find($topicDetailId);
@@ -464,15 +459,11 @@ class SelectStudentController extends Controller
                     ->count();
                 $totalScore += self::calcQuestionScore($attemptCount);
             }
-            // Soal belum benar → skor 0, tidak ditambahkan
         }
 
         return round($totalScore / $totalSoal, 2);
     }
 
-    // ------------------------------------------------------------------
-    // Skor topik = rata-rata skor semua subtopik
-    // ------------------------------------------------------------------
     public static function getTopicScore(int $userId, int $topicId, int $enrollId): float
     {
         $details = SelectTopicDetails::where('topic_id', $topicId)->get();
@@ -739,11 +730,6 @@ class SelectStudentController extends Controller
         if ($topicTime) {
             $countdownSeconds = DB::table('select_topics')
                 ->where('id', $topicId)->value('countdown_seconds') ?? 3600;
-
-            // Prioritas 1: remaining_seconds dikirim langsung dari client di body request.
-            // Ini paling akurat — client tahu persis sisa detik saat submit/waktu habis.
-            // Prioritas 2: remaining_seconds di DB (dari heartbeat terakhir).
-            // Prioritas 3: hitung manual dari started_at (fallback).
             if ($request->has('remaining_seconds')) {
                 $sisaDetik = max(0, (int) $request->input('remaining_seconds'));
             } elseif ($topicTime->remaining_seconds !== null) {
@@ -818,40 +804,164 @@ class SelectStudentController extends Controller
         }
     }
 
-    public function runUserSelectQuery(Request $request)
+    // ------------------------------------------------------------------
+    // FITUR HINT
+    //
+    // Dipanggil via AJAX saat student klik tombol "Lihat Hint" setelah
+    // gagal lebih dari 2 kali (attempts > 2) pada soal TUGAS.
+    //
+    // Tanpa tabel baru — memanfaatkan select_student_submissions yang
+    // sudah ada. Tiap klik hint menambah 2 baris submission bertanda
+    // khusus (query = '[HINT_PENALTY]', status = 'false'). Baris ini
+    // ikut dihitung sebagai attempt oleh calcQuestionScore() yang sudah
+    // ada, sehingga otomatis memotong 2 x 10 = 20 poin tanpa perlu
+    // mengubah rumus skor sama sekali.
+    //
+    // Baris '[HINT_PENALTY]' juga dipakai sebagai penanda "hint sudah
+    // pernah dibuka" untuk soal ini, supaya tombol hint di-disable dan
+    // tidak bisa dipakai berkali-kali (lihat showTopicDetail()).
+    // ------------------------------------------------------------------
+    public function showHint(Request $request)
     {
-        $userId  = Auth::id();
-        $mysqlid = $request->get('mysqlid');
-        $this->setupStudentTestingDatabase($userId, $mysqlid);
+        $request->validate([
+            'topic_detail_id' => 'required|integer',
+            'mysqlid'         => 'required|integer',
+            'submission_type' => 'required|in:tugas', // hint hanya untuk tugas
+            'answer_number'   => 'required|integer|min:1',
+        ]);
 
-        $request->validate(['userSelectQuery' => 'required|string|max:5000']);
-        $query = trim($request->input('userSelectQuery'));
+        $userId         = Auth::id();
+        $topicDetailId  = $request->input('topic_detail_id');
+        $mysqlid        = $request->input('mysqlid');
+        $submissionType = 'tugas';
+        $answerNumber   = $request->input('answer_number');
 
-        if (!preg_match('/^\s*select\s+/i', $query)) {
-            $html = '<div style="color:red;padding:8px;">Only SELECT queries are allowed here!</div>';
-            return $request->ajax() ? response()->json(['html' => $html]) : back()->with('query_result', $html);
+        // Cari sesi aktif student
+        $enroll = DB::table('select_student_topic_times')
+            ->where('user_id', $userId)->where('topic_id', $mysqlid)->where('is_finished', 0)
+            ->orderByDesc('id')->first();
+
+        if (!$enroll) {
+            return response()->json(['success' => false, 'message' => 'Sesi tidak ditemukan.'], 422);
+        }
+        $enrollId = $enroll->id;
+
+        // Soal sudah pernah benar → tidak boleh hint lagi
+        $alreadyCorrect = DB::table('select_student_submissions')
+            ->where('user_id', $userId)->where('topic_detail_id', $topicDetailId)
+            ->where('submission_type', $submissionType)->where('answer_number', $answerNumber)
+            ->where('enroll_id', $enrollId)->where('status', 'true')->exists();
+
+        if ($alreadyCorrect) {
+            return response()->json(['success' => false, 'message' => 'Soal ini sudah dijawab benar.'], 422);
         }
 
-        try {
-            $results = DB::connection('mysql_testing')->select($query);
-            if (empty($results)) {
-                $html = '<div style="color:red;padding:8px;">Data Not Found.</div>';
-            } else {
-                $columns = array_keys((array) $results[0]);
-                $html = '<div style="overflow:auto;max-height:350px;"><table border="1" cellpadding="8" style="border-collapse:collapse;"><thead><tr>';
-                foreach ($columns as $col) $html .= '<th style="background:#288cff;color:#fff;">' . htmlspecialchars($col) . '</th>';
-                $html .= '</tr></thead><tbody>';
-                foreach ($results as $row) {
-                    $html .= '<tr>';
-                    foreach ($columns as $col) $html .= '<td>' . htmlspecialchars($row->$col) . '</td>';
-                    $html .= '</tr>';
-                }
-                $html .= '</tbody></table></div>';
-            }
-        } catch (\Exception $e) {
-            $html = '<div style="color:red;padding:8px;">' . htmlspecialchars($e->getMessage()) . '</div>';
+        // Hint sudah pernah dibuka untuk soal ini → tidak boleh dibuka lagi
+        $hintAlreadyUsed = DB::table('select_student_submissions')
+            ->join('select_queries', 'select_queries.id', '=', 'select_student_submissions.query_id')
+            ->where('select_student_submissions.user_id', $userId)
+            ->where('select_student_submissions.topic_detail_id', $topicDetailId)
+            ->where('select_student_submissions.submission_type', $submissionType)
+            ->where('select_student_submissions.answer_number', $answerNumber)
+            ->where('select_student_submissions.enroll_id', $enrollId)
+            ->where('select_queries.query', '[HINT_PENALTY]')
+            ->exists();
+
+        if ($hintAlreadyUsed) {
+            return response()->json(['success' => false, 'message' => 'Hint untuk soal ini sudah pernah dibuka.'], 422);
         }
 
-        return $request->ajax() ? response()->json(['html' => $html]) : back()->with('query_result', $html);
+        // Attempts asli (tidak termasuk baris penalti hint) harus > 2
+        $attempts = DB::table('select_student_submissions')
+            ->join('select_queries', 'select_queries.id', '=', 'select_student_submissions.query_id')
+            ->where('select_student_submissions.user_id', $userId)
+            ->where('select_student_submissions.topic_detail_id', $topicDetailId)
+            ->where('select_student_submissions.submission_type', $submissionType)
+            ->where('select_student_submissions.answer_number', $answerNumber)
+            ->where('select_student_submissions.enroll_id', $enrollId)
+            ->where('select_queries.query', '!=', '[HINT_PENALTY]')
+            ->count();
+
+        if ($attempts <= 2) {
+            return response()->json(['success' => false, 'message' => 'Hint hanya tersedia setelah mencoba lebih dari 2 kali.'], 422);
+        }
+
+        // Ambil kunci jawaban
+        $expected = SelectExpectedQuery::where('topic_detail_id', $topicDetailId)
+            ->where('type', $submissionType)
+            ->where('answer_number', $answerNumber)
+            ->first();
+
+        if (!$expected || empty($expected->expected_query)) {
+            return response()->json(['success' => false, 'message' => 'Kunci jawaban tidak tersedia untuk soal ini.'], 422);
+        }
+
+        // Catat penalti: 2 baris submission gagal bertanda '[HINT_PENALTY]'
+        // → attempts naik 2 → calcQuestionScore() otomatis memotong 20 poin
+        for ($i = 0; $i < 2; $i++) {
+            $queryId = DB::table('select_queries')->insertGetId([
+                'query'      => '[HINT_PENALTY]',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::table('select_student_submissions')->insert([
+                'user_id'         => $userId,
+                'enroll_id'       => $enrollId,
+                'topic_detail_id' => $topicDetailId,
+                'submission_type' => $submissionType,
+                'answer_number'   => $answerNumber,
+                'query_id'        => $queryId,
+                'feedback_id'     => null,
+                'status'          => 'false',
+                'created_at'      => now(),
+                'updated_at'      => now(),
+            ]);
+        }
+
+        Log::info("Hint dibuka oleh user {$userId} untuk topic_detail_id {$topicDetailId}, soal tugas #{$answerNumber} (-20 poin)");
+
+        return response()->json([
+            'success' => true,
+            'hint'    => $expected->expected_query,
+            'message' => 'Hint berhasil dibuka. Skor soal ini dikurangi 20 poin.',
+        ]);
     }
+
+    // public function runUserSelectQuery(Request $request)
+    // {
+    //     $userId  = Auth::id();
+    //     $mysqlid = $request->get('mysqlid');
+    //     $this->setupStudentTestingDatabase($userId, $mysqlid);
+
+    //     $request->validate(['userSelectQuery' => 'required|string|max:5000']);
+    //     $query = trim($request->input('userSelectQuery'));
+
+    //     if (!preg_match('/^\s*select\s+/i', $query)) {
+    //         $html = '<div style="color:red;padding:8px;">Only SELECT queries are allowed here!</div>';
+    //         return $request->ajax() ? response()->json(['html' => $html]) : back()->with('query_result', $html);
+    //     }
+
+    //     try {
+    //         $results = DB::connection('mysql_testing')->select($query);
+    //         if (empty($results)) {
+    //             $html = '<div style="color:red;padding:8px;">Data Not Found.</div>';
+    //         } else {
+    //             $columns = array_keys((array) $results[0]);
+    //             $html = '<div style="overflow:auto;max-height:350px;"><table border="1" cellpadding="8" style="border-collapse:collapse;"><thead><tr>';
+    //             foreach ($columns as $col) $html .= '<th style="background:#288cff;color:#fff;">' . htmlspecialchars($col) . '</th>';
+    //             $html .= '</tr></thead><tbody>';
+    //             foreach ($results as $row) {
+    //                 $html .= '<tr>';
+    //                 foreach ($columns as $col) $html .= '<td>' . htmlspecialchars($row->$col) . '</td>';
+    //                 $html .= '</tr>';
+    //             }
+    //             $html .= '</tbody></table></div>';
+    //         }
+    //     } catch (\Exception $e) {
+    //         $html = '<div style="color:red;padding:8px;">' . htmlspecialchars($e->getMessage()) . '</div>';
+    //     }
+
+    //     return $request->ajax() ? response()->json(['html' => $html]) : back()->with('query_result', $html);
+    // }
 }

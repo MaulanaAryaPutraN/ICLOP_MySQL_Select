@@ -50,10 +50,6 @@ BEGIN
     RETURN TRUE;
 END //
 
--- ============================================================
--- [FIX] expected_has_order_by
--- Deteksi ORDER BY di kunci jawaban → mode hash order-sensitive.
--- ============================================================
 DROP FUNCTION IF EXISTS expected_has_order_by //
 CREATE FUNCTION expected_has_order_by(query_text VARCHAR(5000))
 RETURNS BOOLEAN DETERMINISTIC
@@ -64,10 +60,6 @@ BEGIN
     RETURN FALSE;
 END //
 
--- ============================================================
--- [FIX] expected_has_distinct
--- Deteksi SELECT DISTINCT di kunci jawaban.
--- ============================================================
 DROP FUNCTION IF EXISTS expected_has_distinct //
 CREATE FUNCTION expected_has_distinct(query_text VARCHAR(5000))
 RETURNS BOOLEAN DETERMINISTIC
@@ -78,10 +70,6 @@ BEGIN
     RETURN FALSE;
 END //
 
--- ============================================================
--- [FIX] student_has_order_by
--- Deteksi ORDER BY di query mahasiswa.
--- ============================================================
 DROP FUNCTION IF EXISTS student_has_order_by //
 CREATE FUNCTION student_has_order_by(query_text VARCHAR(5000))
 RETURNS BOOLEAN DETERMINISTIC
@@ -92,10 +80,6 @@ BEGIN
     RETURN FALSE;
 END //
 
--- ============================================================
--- [FIX] student_has_distinct
--- Deteksi SELECT DISTINCT di query mahasiswa.
--- ============================================================
 DROP FUNCTION IF EXISTS student_has_distinct //
 CREATE FUNCTION student_has_distinct(query_text VARCHAR(5000))
 RETURNS BOOLEAN DETERMINISTIC
@@ -119,10 +103,11 @@ BEGIN
         RETURN result;
     END IF;
     IF INSTR(error_upper, 'UNKNOWN COLUMN') > 0 THEN
-        SET result = SUBSTRING(error_text, INSTR(error_text, 'Unknown'), 100);
-        IF INSTR(result, '.') > 0 THEN
-            SET result = SUBSTRING(result, 1, INSTR(result, '.'));
-        END IF;
+        SET result = SUBSTRING(error_text, INSTR(error_text, 'Unknown'), 200);
+        SET result = REPLACE(result, "in 'SELECT'",       "in 'field list'");
+        SET result = REPLACE(result, "in 'where clause'", "in 'field list'");
+        SET result = REPLACE(result, "in 'order clause'", "in 'field list'");
+        SET result = REPLACE(result, "in 'having clause'","in 'field list'");
         RETURN result;
     END IF;
     IF INSTR(error_upper, 'UNKNOWN DATABASE') > 0 THEN
@@ -150,6 +135,9 @@ END //
 -- [FIX] CHECK 7c – Order-sensitive hash:
 --   Jika kunci jawaban pakai ORDER BY, hash dihitung via ROW_NUMBER()
 --   sehingga urutan baris ikut dibandingkan (bukan di-sort ulang).
+--
+-- [NOTE] Fungsi ok() dan tabel _tap_counters ada di database ini sendiri
+--   (db_kuliah). Tidak membutuhkan database tap terpisah.
 -- ============================================================
 DROP PROCEDURE IF EXISTS test_select_query //
 CREATE PROCEDURE test_select_query(
@@ -179,36 +167,30 @@ BEGIN
         SET v_error_msg = clean_error_message(v_error_text);
     END;
 
-    UPDATE tap.counters SET test_num = 0 WHERE id = 1;
+    UPDATE _tap_counters SET test_num = 0 WHERE id = 1;
 
     SET v_clean_query = TRIM(REGEXP_REPLACE(TRIM(p_query), ';\\s*$', ''));
 
-    -- CHECK 1
     IF LENGTH(v_clean_query) = 0 THEN
         SET v_is_valid = FALSE; SET v_error_msg = 'Query cannot be empty';
     END IF;
 
-    -- CHECK 2
     IF v_is_valid = TRUE AND has_forbidden_keywords(v_clean_query) = TRUE THEN
         SET v_is_valid = FALSE; SET v_error_msg = 'Forbidden keywords: INSERT, UPDATE, DELETE, etc';
     END IF;
 
-    -- CHECK 3
     IF v_is_valid = TRUE AND validate_select_syntax(v_clean_query) = FALSE THEN
         SET v_is_valid = FALSE; SET v_error_msg = 'Query does not match allowed SELECT patterns';
     END IF;
 
-    -- CHECK 4
     IF v_is_valid = TRUE AND has_select_star(v_clean_query) = TRUE THEN
         SET v_is_valid = FALSE; SET v_error_msg = 'SELECT * is not allowed - specify columns';
     END IF;
 
-    -- CHECK 5
     IF v_is_valid = TRUE AND validate_supported_clauses(v_clean_query) = FALSE THEN
         SET v_is_valid = FALSE; SET v_error_msg = 'Unsupported clauses: GROUP BY, JOIN, UNION, etc';
     END IF;
 
-    -- CHECK 6: Eksekusi query mahasiswa
     IF v_is_valid = TRUE THEN
         BEGIN
             DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -228,20 +210,12 @@ BEGIN
         END;
     END IF;
 
-    -- CHECK 7: Pencocokan dengan kunci jawaban
     IF v_is_valid = TRUE
         AND p_expected_query IS NOT NULL
         AND TRIM(p_expected_query) != ''
     THEN
-        -- --------------------------------------------------------
-        -- CHECK 7a: Structural check DISTINCT & ORDER BY
-        -- Dilakukan di LUAR blok BEGIN...END ber-EXIT HANDLER agar
-        -- v_is_valid = FALSE langsung efektif dan tidak di-override
-        -- oleh handler. Pesan memakai format "Result mismatch: ..."
-        -- --------------------------------------------------------
         SET v_clean_expected = TRIM(REGEXP_REPLACE(TRIM(p_expected_query), ';\\s*$', ''));
 
-        -- Kunci pakai DISTINCT, mahasiswa tidak
         IF v_is_valid = TRUE
            AND expected_has_distinct(v_clean_expected) = TRUE
            AND student_has_distinct(v_clean_query)     = FALSE
@@ -250,7 +224,6 @@ BEGIN
             SET v_error_msg = 'Result mismatch: your query result does not match the expected answer';
         END IF;
 
-        -- Mahasiswa pakai DISTINCT, kunci tidak
         IF v_is_valid = TRUE
            AND expected_has_distinct(v_clean_expected) = FALSE
            AND student_has_distinct(v_clean_query)     = TRUE
@@ -259,7 +232,6 @@ BEGIN
             SET v_error_msg = 'Result mismatch: your query result does not match the expected answer';
         END IF;
 
-        -- Kunci pakai ORDER BY, mahasiswa tidak
         IF v_is_valid = TRUE
            AND expected_has_order_by(v_clean_expected) = TRUE
            AND student_has_order_by(v_clean_query)     = FALSE
@@ -268,7 +240,6 @@ BEGIN
             SET v_error_msg = 'Result mismatch: your query result does not match the expected answer';
         END IF;
 
-        -- Mahasiswa pakai ORDER BY, kunci tidak
         IF v_is_valid = TRUE
            AND expected_has_order_by(v_clean_expected) = FALSE
            AND student_has_order_by(v_clean_query)     = TRUE
@@ -277,9 +248,6 @@ BEGIN
             SET v_error_msg = 'Result mismatch: your query result does not match the expected answer';
         END IF;
 
-        -- --------------------------------------------------------
-        -- Lanjut eksekusi dan bandingkan data hanya jika lolos 7a
-        -- --------------------------------------------------------
         IF v_is_valid = TRUE THEN
         BEGIN
             DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -292,7 +260,6 @@ BEGIN
                 SET v_error_msg = CONCAT('Expected query error: ', clean_error_message(v_error_text));
             END;
 
-                -- Tentukan mode hash berdasarkan kunci jawaban
                 SET v_need_order_check = expected_has_order_by(v_clean_expected);
 
                 DROP TABLE IF EXISTS _tap_expected_result;
@@ -301,7 +268,6 @@ BEGIN
                 EXECUTE _tap_stmt;
                 DEALLOCATE PREPARE _tap_stmt;
 
-                -- CHECK 7b: Bandingkan jumlah baris
                 SELECT COUNT(*) INTO v_count_student  FROM _tap_student_result;
                 SELECT COUNT(*) INTO v_count_expected FROM _tap_expected_result;
 
@@ -310,10 +276,8 @@ BEGIN
                     SET v_error_msg = 'Result mismatch: your query result does not match the expected answer';
                 END IF;
 
-                -- CHECK 7c: Bandingkan isi via hash
                 IF v_is_valid = TRUE THEN
 
-                    -- Bangun ekspresi kolom untuk student result
                     SELECT GROUP_CONCAT(
                         CONCAT('IFNULL(CAST(`', COLUMN_NAME, '` AS CHAR),''NULL'')')
                         ORDER BY ORDINAL_POSITION
@@ -325,8 +289,6 @@ BEGIN
                       AND TABLE_NAME   = '_tap_student_result';
 
                     IF v_need_order_check = TRUE THEN
-                        -- [FIX] Order-sensitive: pakai ROW_NUMBER agar urutan
-                        -- baris dari query mahasiswa ikut dibandingkan.
                         SET @_tap_sql = CONCAT(
                             'SELECT MD5(GROUP_CONCAT(CONCAT(',
                             @_tap_col_expr,
@@ -337,7 +299,6 @@ BEGIN
                             ') _s'
                         );
                     ELSE
-                        -- Set-based: urutan fisik diabaikan
                         SET @_tap_sql = CONCAT(
                             'SELECT MD5(GROUP_CONCAT(CONCAT(',
                             @_tap_col_expr,
@@ -348,8 +309,6 @@ BEGIN
                     PREPARE _tap_stmt FROM @_tap_sql;
                     EXECUTE _tap_stmt;
                     DEALLOCATE PREPARE _tap_stmt;
-
-                    -- Bangun ekspresi kolom untuk expected result
                     SELECT GROUP_CONCAT(
                         CONCAT('IFNULL(CAST(`', COLUMN_NAME, '` AS CHAR),''NULL'')')
                         ORDER BY ORDINAL_POSITION
@@ -390,17 +349,16 @@ BEGIN
 
                 DROP TABLE IF EXISTS _tap_expected_result;
 
-        END; -- END blok BEGIN...END eksekusi expected
-        END IF; -- END IF v_is_valid setelah 7a
-    END IF; -- END IF CHECK 7
+        END; 
+        END IF; 
+    END IF; 
 
     DROP TABLE IF EXISTS _tap_student_result;
 
-    -- Output TAP
     IF v_is_valid = TRUE THEN
-        SET v_test_result = tap.ok(TRUE,  'Query validation passed');
+        SET v_test_result = ok(TRUE,  'Query validation passed');
     ELSE
-        SET v_test_result = tap.ok(FALSE, v_error_msg);
+        SET v_test_result = ok(FALSE, v_error_msg);
     END IF;
 
     SELECT v_test_result AS result;

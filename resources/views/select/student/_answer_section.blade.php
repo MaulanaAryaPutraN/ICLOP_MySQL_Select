@@ -86,29 +86,6 @@
     </div>
 <script>
 (function() {
-    // Auto-run query hasil percobaan
-    const queryResult = document.getElementById('query-result');
-    const autoRunEl   = document.getElementById('query-for-autorun');
-    const query       = autoRunEl ? autoRunEl.value.trim() : '';
-    const mysqlid     = document.querySelector('input[name="mysqlid"]').value;
-
-    if (query && mysqlid) {
-        fetch('{{ route('v2.runUserSelectQuery') }}', {
-            method: 'POST',
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({ mysqlid, userSelectQuery: query, _token: document.querySelector('meta[name="csrf-token"]').content })
-        })
-        .then(r => r.json())
-        .then(d => { queryResult.innerHTML = d.html; })
-        .catch(() => { queryResult.innerHTML = '<div class="alert alert-danger">Gagal menjalankan query.</div>'; });
-    } else {
-        queryResult.innerHTML = '';
-    }
-
     // Countdown lalu transisi ke tugas
     function goToTugas() {
         const start = '{{ $detail->id }}';
@@ -195,6 +172,26 @@
                     </button>
                 </div>
             </form>
+
+            {{-- ============================================================
+                 FITUR HINT — hanya tampil untuk soal tugas.
+                 Data ini dibaca oleh bindHintPopup() di topic_detail_blade.php
+                 untuk menentukan apakah popup penawaran hint perlu ditampilkan.
+            ============================================================ --}}
+            @if($currentPhase === 'tugas')
+                <input type="hidden" id="hint-context"
+                    data-topic-detail-id="{{ $detail->id }}"
+                    data-mysqlid="{{ $mysqlid }}"
+                    data-answer-number="{{ $page }}"
+                    data-show-offer="{{ ($showHintOffer ?? false) ? '1' : '0' }}"
+                    data-hint-used="{{ ($hintUsed ?? false) ? '1' : '0' }}">
+
+                @if($hintUsed ?? false)
+                    <div class="alert alert-warning py-2 px-3 mt-2" style="font-size:13px;">
+                        &#128161; <strong>Hint sudah digunakan</strong> untuk soal ini (-20 poin dari skor).
+                    </div>
+                @endif
+            @endif
 
             {{-- Feedback --}}
             @if($isCorrect)
@@ -375,37 +372,10 @@
     </div>
 
 <script>
-// Auto-run query — hanya jika server belum menyediakan hasil (queryResultHtml kosong)
 (function() {
     const queryResult = document.getElementById('query-result');
     if (!queryResult) return;
-
-    // Jika sudah ada konten dari server (bukan spinner), tidak perlu fetch
-    const hasServerResult = {{ !empty($queryResultHtml) ? 'true' : 'false' }};
-    if (hasServerResult) return;
-
-    const textarea = document.getElementById('query-textarea');
-    const autoRunEl = document.getElementById('query-for-autorun');
-    if (!textarea) return;
-
-    const query   = textarea.value.trim() || (autoRunEl ? autoRunEl.value.trim() : '');
-    const mysqlid = document.querySelector('input[name="mysqlid"]') ? document.querySelector('input[name="mysqlid"]').value : '';
-    if (!query || !mysqlid) {
-        queryResult.innerHTML = '';
-        return;
-    }
-    fetch('{{ route('v2.runUserSelectQuery') }}', {
-        method: 'POST',
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-            'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: new URLSearchParams({ mysqlid: mysqlid, userSelectQuery: query, _token: document.querySelector('meta[name="csrf-token"]').content })
-    })
-    .then(r => r.json())
-    .then(d => { queryResult.innerHTML = d.html; })
-    .catch(() => { queryResult.innerHTML = '<div class="alert alert-danger">Gagal menjalankan query.</div>'; });
+    // Hasil query sudah dirender server-side, tidak perlu fetch AJAX
 })();
 
 (function() {

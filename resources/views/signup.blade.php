@@ -77,12 +77,25 @@
         <form action="{{ route('post_signup') }}" method="post" onsubmit="return validateForm()">
             @csrf
             <label for="name" class="form-label">Name</label>
-            <input class="form-control" list="datalistOptions" id="name" placeholder="Name" name="name">
+            <input class="form-control @error('name') is-invalid @enderror"
+                list="datalistOptions" id="name" placeholder="Name" name="name"
+                value="{{ old('name') }}">
+            @error('name')
+                <div class="invalid-feedback" style="display:block; margin-top:-15px; margin-bottom:10px;">
+                    {{ $message }}
+                </div>
+            @enderror
 
             <label for="email" class="form-label">Email</label>
-            <input class="form-control" list="datalistOptions" id="email" name="email" placeholder="Email"
-                onblur="validateEmail()">
+            <input class="form-control @error('email') is-invalid @enderror"
+                list="datalistOptions" id="email" name="email" placeholder="Email"
+                value="{{ old('email') }}" onblur="validateEmail()">
 
+            @error('email')
+                <div class="invalid-feedback" style="display:block; margin-top:-15px; margin-bottom:10px;">
+                    {{ $message }}
+                </div>
+            @enderror
             <div id="emailAlert" style="color: red; margin-top: 5px;"></div>
 
             <label for="password" class="form-label">Password</label>

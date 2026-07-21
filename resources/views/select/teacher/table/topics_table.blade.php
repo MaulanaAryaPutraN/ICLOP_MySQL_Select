@@ -109,7 +109,7 @@
                     </div>
                     <div id="subtopics-container">
                         <div class="row mb-3 subtopic-group align-items-center" style="border-top: 1px solid #ccc">
-                            <div class="col-md-8">
+                            <div class="col-md-7">
                                 <label class="form-label fw-bold">Sub-Topic</label>
                                 <input type="text" class="form-control" name="sub_topic_title[]" autocomplete="off" required>
                             </div>
@@ -123,6 +123,11 @@
                                     </label>
                                 </div>
                                 <div class="text-danger" style="font-size: 12px; margin-left: 0.2rem;">Please upload a file with .pdf extension.</div>
+                            </div>
+                            <div class="col-md-1 d-flex justify-content-center align-items-center" style="height: 100%; margin-top: 2rem;">
+                                <button type="button" class="btn btn-minus-red remove-subtopic-btn d-flex align-items-center justify-content-center" style="height: 38px; width: 38px;">
+                                    <i class="fas fa-minus"></i>
+                                </button>
                             </div>
                         </div>
                     </div>

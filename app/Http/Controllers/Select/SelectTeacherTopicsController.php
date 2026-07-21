@@ -32,9 +32,10 @@ class SelectTeacherTopicsController extends Controller
 
     // ------------------------------------------------------------------
     // ADD TOPIC + SUBTOPIC
-    // Setelah topic disimpan → langsung buat db_kuliah
-    // import schema dosen + install myTAP
-    // Sehingga saat mahasiswa mulai mengerjakan, database sudah siap
+    // Setelah topic disimpan → langsung buat db_kuliah,
+    // import schema dosen + install myTAP (functions & procedure
+    // langsung masuk ke db_kuliah, tidak pakai database tap terpisah).
+    // Sehingga saat mahasiswa mulai mengerjakan, database sudah siap.
     // ------------------------------------------------------------------
     public function addTopicSubtopic(Request $request)
     {
@@ -184,7 +185,7 @@ class SelectTeacherTopicsController extends Controller
 
         // Jika schema diupdate → drop db lama dan buat ulang
         if ($schemaUpdated) {
-            $this->dropTestingDatabase(); // ← ganti dari inline DB::statement
+            $this->dropTestingDatabase();
             $this->createTestingDatabase($id, public_path($topic->schema_file_path . $topic->schema_file_name));
         }
 
@@ -245,55 +246,57 @@ class SelectTeacherTopicsController extends Controller
     //
     // Dipanggil saat dosen add topic (atau update schema).
     // db_kuliah dibuat, schema diimport, myTAP diinstall.
+    //
+    // Urutan install:
+    //   1. Buat database db_kuliah
+    //   2. Import schema dosen
+    //   3. Install mytap_setup.sql  → buat _tap_counters + fungsi ok()/plan()
+    //      langsung di db_kuliah (tidak butuh database tap terpisah)
+    //   4. Install mytap_runner_select.sql → buat procedure test_select_query
+    //
     // Sehingga saat mahasiswa buka materi, database SUDAH SIAP.
     // ------------------------------------------------------------------
     private function createTestingDatabase(int $topicId, string $schemaPath): void
     {
-        $dbName   = "db_kuliah";
-        $dbHost   = config('database.connections.mysql.host');
-        $dbPort   = config('database.connections.mysql.port', 3306);
-        $dbUser   = config('database.connections.mysql.username');
-        $dbPass   = config('database.connections.mysql.password');
-        $passArg  = $dbPass ? "-p\"{$dbPass}\"" : "";
+        $dbName  = "db_kuliah";
+        $dbHost  = config('database.connections.mysql.host');
+        $dbPort  = config('database.connections.mysql.port', 3306);
+        $dbUser  = config('database.connections.mysql.username');
+        $dbPass  = config('database.connections.mysql.password');
+        $passArg = $dbPass ? "-p\"{$dbPass}\"" : "";
 
         // Path file myTAP — taruh di database/sql/
-        $mytapPath    = base_path('database/sql/mytap_runner_select.sql');
-        $mytapSetup   = base_path('database/sql/mytap_setup.sql');
+        $mytapSetup  = base_path('database/sql/mytap_setup.sql');
+        $mytapRunner = base_path('database/sql/mytap_runner_select.sql');
 
         try {
-            // 1. Buat database tap (counter TAP) jika belum ada
-            //    Cukup dijalankan sekali, tapi aman diulang (IF NOT EXISTS)
-            $tapExists = DB::select(
-                "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'tap'"
-            );
-            if (empty($tapExists)) {
-                $tapCmd = "mysql -h {$dbHost} -P {$dbPort} -u {$dbUser} {$passArg} < \"{$mytapSetup}\"";
-                shell_exec($tapCmd);
-                Log::info("Database tap berhasil dibuat.");
-            }
-
-            // 2. Buat database testing db_kuliah
+            // 1. Buat database testing db_kuliah
             DB::statement("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
 
-            // 3. Import schema dosen ke database testing
+            // 2. Import schema dosen ke database testing
             $importCmd = "mysql -h {$dbHost} -P {$dbPort} -u {$dbUser} {$passArg} {$dbName} < \"{$schemaPath}\"";
             shell_exec($importCmd);
 
-            // 4. Install myTAP (functions + procedure test_select_query)
-            //    Procedure ini yang nantinya dipanggil saat mahasiswa submit SELECT query
-            $mytapCmd = "mysql -h {$dbHost} -P {$dbPort} -u {$dbUser} {$passArg} {$dbName} < \"{$mytapPath}\"";
-            shell_exec($mytapCmd);
+            // 3. Install myTAP setup: buat tabel _tap_counters + fungsi ok()/plan()
+            //    Semua objek TAP masuk ke db_kuliah langsung (tidak ada database tap terpisah)
+            $setupCmd = "mysql -h {$dbHost} -P {$dbPort} -u {$dbUser} {$passArg} {$dbName} < \"{$mytapSetup}\"";
+            shell_exec($setupCmd);
 
-            Log::info("Database {$dbName} berhasil dibuat: schema diimport + myTAP terinstall.");
+            // 4. Install myTAP runner: buat procedure test_select_query + fungsi validasi
+            $runnerCmd = "mysql -h {$dbHost} -P {$dbPort} -u {$dbUser} {$passArg} {$dbName} < \"{$mytapRunner}\"";
+            shell_exec($runnerCmd);
+
+            Log::info("Database {$dbName} berhasil dibuat: schema diimport + myTAP terinstall (table-based, tanpa database tap terpisah).");
         } catch (\Exception $e) {
             Log::error("Gagal buat database {$dbName}: " . $e->getMessage());
             throw $e;
         }
     }
+
     // ------------------------------------------------------------------
     // DROP DATABASE TESTING
     // Dipanggil saat dosen hapus topic atau update schema.
-    // Menggunakan shell_exec untuk reliability (hindari active connection issue)
+    // Menggunakan shell_exec untuk reliability (hindari active connection issue).
     // ------------------------------------------------------------------
     private function dropTestingDatabase(): void
     {

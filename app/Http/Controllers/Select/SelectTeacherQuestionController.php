@@ -75,17 +75,4 @@ class SelectTeacherQuestionController extends Controller
 
         return response()->json(['success' => true]);
     }
-
-    public function getQuestionList()
-    {
-        return SelectExpectedQuery::with('topicDetail')->get();
-    }
-    public function getSubtopicList()
-    {
-        return SelectTopicDetails::all();
-    }
-    public function getTopicList()
-    {
-        return SelectTopics::all();
-    }
 }

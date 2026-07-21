@@ -27,17 +27,14 @@ class AuthController extends Controller
 
             if (Auth::user()->role == "admin") {
                 return redirect('welcome');
-
             } else if (Auth::user()->role == "teacher") {
                 return redirect('dashboard_teacher');
-
             } else {
                 // student
                 session(['key' => Auth::user()->name]);
                 session(['email' => Auth::user()->email]);
                 return redirect('dashboard-student');
             }
-
         } else {
 
             echo "error login";
@@ -47,12 +44,18 @@ class AuthController extends Controller
     public function signup(Request $request)
     {
         $data = $request->validate([
-            'name' => 'required',
-            'email' => 'required',
+            'name'     => 'required',
+            'email'    => 'required',
             'password' => 'required|confirmed',
-            'role' => 'required',
-
+            'role'     => 'required',
         ]);
+
+        // Cek apakah email sudah terdaftar
+        if (User::where('email', $data['email'])->exists()) {
+            return redirect()->back()
+                ->withInput()
+                ->withErrors(['email' => 'Email ini sudah digunakan, silakan gunakan email lain.']);
+        }
         $data['password'] = bcrypt($data['password']);
         User::create($data);
 
@@ -105,7 +108,8 @@ class AuthController extends Controller
             return redirect()->route('dashboard-student');
         }
     }
-    protected function createDatabase($dbUsername, $dbPassword) {
+    protected function createDatabase($dbUsername, $dbPassword)
+    {
         try {
             $connection = DB::connection('mysql')->getPdo();
             DB::statement("CREATE USER '{$dbUsername}'@'%' IDENTIFIED BY '';"); // Empty password

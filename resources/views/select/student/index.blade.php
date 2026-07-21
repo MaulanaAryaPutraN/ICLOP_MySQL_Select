@@ -757,7 +757,7 @@
                     <div class="col-md-7">
                         <b>Prerequisite knowledge : </b>
                         <div class="text-sm" style="margin-bottom: 20px">
-                            <p style="margin-bottom: 5px !important">Sebelum memulai pembelajaran MySQL DML, Anda harus memiliki pengetahuan dasar tentang <b>Database Management Systems (DBMS)</b> dan <b>SQL</b>.</p>
+                            <p style="margin-bottom: 5px !important">Sebelum memulai pembelajaran MySQL Statement Select, Anda harus memiliki pengetahuan dasar tentang <b>Database Management Systems (DBMS)</b> dan <b>SQL</b>.</p>
                             1. SQL digunakan untuk mengelola dan mengakses data dalam database.<br>
                             2. DBMS membantu menyimpan, mengatur, dan mengambil data secara efisien.<br/>
                             3. Pemahaman dasar tentang konsep relasi dalam database.
